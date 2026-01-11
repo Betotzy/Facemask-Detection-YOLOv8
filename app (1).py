@@ -78,13 +78,11 @@ def process_frame(frame, resize=True):
     
     h, w = frame.shape[:2]
     
-    # Resize untuk inference lebih cepat (optional)
     if resize and inference_size < 640:
         frame_resized = cv2.resize(frame, (inference_size, inference_size))
     else:
         frame_resized = frame
     
-    # Run inference dengan parameter optimized
     results = model(
         frame_resized, 
         conf=conf_thres,
@@ -94,23 +92,19 @@ def process_frame(frame, resize=True):
     
     boxes = results[0].boxes
 
-    # Filter selected classes
     if boxes is not None:
         for box in boxes:
             cls_id = int(box.cls[0])
             label = class_names[cls_id]
 
             if label not in selected_classes:
-                box.conf[0] = 0  # hide
+                box.conf[0] = 0
 
-    # Plot results
     annotated = results[0].plot()
     
-    # Resize kembali ke ukuran original jika di-resize
     if resize and inference_size < 640:
         annotated = cv2.resize(annotated, (w, h))
 
-    # Add FPS counter
     fps = 1 / (time.time() - start)
     if show_fps:
         num_detections = len(boxes) if boxes is not None else 0
@@ -125,7 +119,6 @@ def process_frame(frame, resize=True):
         )
 
     return annotated, results
-
 
 # ===============================
 # INPUT SOURCE
@@ -179,7 +172,6 @@ else:
             st.error("❌ Cannot open video file")
             st.stop()
         
-        # Get video info
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = int(cap.get(cv2.CAP_PROP_FPS))
         width = int(cap.get(3))
@@ -207,29 +199,25 @@ else:
             if not ret:
                 break
 
-            # Skip frames untuk optimization
             if frame_count % skip_frames != 0:
                 if writer:
                     writer.write(frame)
                 frame_count += 1
                 continue
 
-            # Process frame ONLY ONCE
+            # Process frame HANYA SEKALI
             frame_processed, results = process_frame(frame, resize=True)
             processed_count += 1
             
-            # Count detections dari hasil inference
             if results[0].boxes is not None:
                 total_detections += len(results[0].boxes)
 
             if writer:
                 writer.write(frame_processed)
 
-            # Display frame
             frame_rgb = cv2.cvtColor(frame_processed, cv2.COLOR_BGR2RGB)
             frame_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
             
-            # Update progress bar
             progress = frame_count / total_frames
             progress_bar.progress(min(progress, 1.0))
             
@@ -242,7 +230,6 @@ else:
         progress_bar.progress(1.0)
         st.success(f"✅ Done! ({processed_count} frames processed | {total_detections} total detections)")
         
-        # Download button
         if save_video and os.path.exists("output/video_output.mp4"):
             with open("output/video_output.mp4", "rb") as f:
                 st.download_button(
@@ -252,6 +239,5 @@ else:
                     "video/mp4"
                 )
         
-        # Cleanup temp file
         if os.path.exists(temp_path):
             os.remove(temp_path)
