@@ -48,7 +48,7 @@ selected_classes = st.sidebar.multiselect(
 
 show_fps = st.sidebar.checkbox("Show FPS", True)
 save_video = st.sidebar.checkbox("Save Output Video", False)
-skip_frames = st.sidebar.slider("Process Every N Frames", 1, 5, 2)
+skip_frames = st.sidebar.slider("Skip Frames", 1, 5, 2)
 inference_size = st.sidebar.selectbox("Inference Size", [320, 416, 640], index=1)
 
 os.makedirs("output", exist_ok=True)
@@ -150,7 +150,7 @@ else:
         height = int(cap.get(4))
         
         with status_text.container():
-            st.info(f"📹 Video: {total_frames} frames @ {fps}fps | Processing every {skip_frames} frame(s)")
+            st.info(f"📹 {total_frames} frames @ {fps}fps | Processing every {skip_frames} frame(s)")
         
         writer = None
         if save_video:
@@ -195,12 +195,12 @@ else:
             writer.release()
 
         progress_bar.progress(1.0)
-        st.success(f"✅ Video processing completed! ({processed_count} frames processed)")
+        st.success(f"✅ Done! ({processed_count} frames processed)")
         
         if save_video and os.path.exists("output/video_output.mp4"):
             with open("output/video_output.mp4", "rb") as f:
                 st.download_button(
-                    "⬇️ Download Output Video",
+                    "⬇️ Download",
                     f.read(),
                     "video_output.mp4",
                     "video/mp4"
