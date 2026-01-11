@@ -99,59 +99,19 @@ def process_frame(frame, resize=True):
 # ===============================
 # INPUT SOURCE
 # ===============================
-IS_CLOUD = os.environ.get("STREAMLIT_SERVER_RUNNING") == "true"
-
-if IS_CLOUD:
-    st.info("ℹ️ Webcam tidak tersedia di Streamlit Cloud. Gunakan Image atau Video.")
-    source = st.selectbox("Select Input Source", ["Image", "Video"])
-else:
-    source = st.selectbox("Select Input Source", ["Webcam", "Image", "Video"])
+source = st.selectbox(
+    "Select Input Source",
+    ["Image", "Video"]
+)
 
 frame_placeholder = st.empty()
 progress_bar = st.empty()
 status_text = st.empty()
 
 # ===============================
-# WEBCAM MODE
-# ===============================
-if source == "Webcam":
-    run = st.checkbox("▶ Start Webcam")
-
-    if run:
-        cap = cv2.VideoCapture(0)
-        writer = None
-
-        if save_video:
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            writer = cv2.VideoWriter(
-                "output/webcam_output.mp4",
-                fourcc,
-                20,
-                (int(cap.get(3)), int(cap.get(4)))
-            )
-
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            frame = cv2.flip(frame, 1)
-            frame = process_frame(frame, resize=True)
-
-            if writer:
-                writer.write(frame)
-
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
-
-        cap.release()
-        if writer:
-            writer.release()
-
-# ===============================
 # IMAGE MODE
 # ===============================
-elif source == "Image":
+if source == "Image":
     image_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
 
     if image_file:
