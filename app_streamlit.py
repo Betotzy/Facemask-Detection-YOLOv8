@@ -36,7 +36,7 @@ conf_thres = st.sidebar.slider(
     "Confidence Threshold",
     min_value=0.1,
     max_value=1.0,
-    value=0.4,
+    value=0.5,
     step=0.05
 )
 
@@ -48,8 +48,8 @@ selected_classes = st.sidebar.multiselect(
 
 show_fps = st.sidebar.checkbox("Show FPS", True)
 save_video = st.sidebar.checkbox("Save Output Video", False)
-skip_frames = st.sidebar.slider("Process Every N Frames", 1, 5, 1)
-inference_size = st.sidebar.selectbox("Inference Size", [320, 416, 640], index=2)
+skip_frames = st.sidebar.slider("Process Every N Frames", 1, 5, 2)
+inference_size = st.sidebar.selectbox("Inference Size", [320, 416, 640], index=1)
 
 os.makedirs("output", exist_ok=True)
 
@@ -57,11 +57,13 @@ os.makedirs("output", exist_ok=True)
 # HELPER FUNCTION
 # ===============================
 def process_frame(frame, resize=True):
+    """Process frame dengan YOLO inference"""
     start = time.time()
     
-    # Resize frame untuk inference lebih cepat
+    h, w = frame.shape[:2]
+    
+    # Resize untuk inference lebih cepat
     if resize:
-        h, w = frame.shape[:2]
         frame_resized = cv2.resize(frame, (inference_size, inference_size))
     else:
         frame_resized = frame
@@ -69,11 +71,11 @@ def process_frame(frame, resize=True):
     results = model(frame_resized, conf=conf_thres, verbose=False)
     boxes = results[0].boxes
 
+    # Filter selected classes
     if boxes is not None:
         for box in boxes:
             cls_id = int(box.cls[0])
             label = class_names[cls_id]
-
             if label not in selected_classes:
                 box.conf[0] = 0
 
@@ -83,11 +85,12 @@ def process_frame(frame, resize=True):
     if resize:
         annotated = cv2.resize(annotated, (w, h))
 
-    fps = 1 / (time.time() - start)
+    # Add FPS
     if show_fps:
+        fps = 1 / (time.time() - start)
         cv2.putText(
             annotated,
-            f"FPS: {fps:.2f}",
+            f"FPS: {fps:.1f}",
             (20, 40),
             cv2.FONT_HERSHEY_SIMPLEX,
             1,
@@ -146,11 +149,14 @@ else:
 
         cap = cv2.VideoCapture(temp_path)
         
-        # Dapatkan informasi video
+        # Dapatkan info video
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = int(cap.get(cv2.CAP_PROP_FPS))
         width = int(cap.get(3))
         height = int(cap.get(4))
+        
+        with status_text.container():
+            st.info(f"📹 Video: {total_frames} frames @ {fps}fps | Processing every {skip_frames} frame(s)")
         
         writer = None
         if save_video:
@@ -163,10 +169,8 @@ else:
             )
 
         frame_count = 0
+        processed_count = 0
         
-        with status_text.container():
-            st.info(f"📹 Video: {total_frames} frames @ {fps}fps")
-
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -174,14 +178,19 @@ else:
 
             # Skip frames untuk kecepatan
             if frame_count % skip_frames != 0:
+                if writer:
+                    writer.write(frame)
                 frame_count += 1
                 continue
 
+            # Process frame
             frame = process_frame(frame, resize=True)
+            processed_count += 1
 
             if writer:
                 writer.write(frame)
 
+            # Display
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
             
@@ -196,8 +205,9 @@ else:
             writer.release()
 
         progress_bar.progress(1.0)
-        st.success("✅ Video processing completed!")
+        st.success(f"✅ Video processing completed! ({processed_count} frames processed)")
         
+        # Download button
         if save_video and os.path.exists("output/video_output.mp4"):
             with open("output/video_output.mp4", "rb") as f:
                 st.download_button(
@@ -206,3 +216,7 @@ else:
                     "video_output.mp4",
                     "video/mp4"
                 )
+        
+        # Cleanup
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
