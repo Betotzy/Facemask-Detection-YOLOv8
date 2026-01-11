@@ -22,9 +22,19 @@ st.caption("Real-time mask detection with image or video")
 # ===============================
 @st.cache_resource
 def load_model():
-    return YOLO("best.pt")
+    try:
+        model = YOLO("best.pt")
+        return model
+    except Exception as e:
+        st.error(f"Error loading model: {str(e)}")
+        st.info("💡 Pastikan file best.pt ada di folder root dan format .pt valid")
+        return None
 
 model = load_model()
+
+if model is None:
+    st.stop()
+
 class_names = model.names
 
 # ===============================
@@ -73,6 +83,7 @@ def process_frame(frame, resize=True):
         for box in boxes:
             cls_id = int(box.cls[0])
             label = class_names[cls_id]
+
             if label not in selected_classes:
                 box.conf[0] = 0
 
@@ -143,6 +154,10 @@ else:
             f.write(video_file.read())
 
         cap = cv2.VideoCapture(temp_path)
+        
+        if not cap.isOpened():
+            st.error("❌ Error loading video")
+            st.stop()
         
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = int(cap.get(cv2.CAP_PROP_FPS))
