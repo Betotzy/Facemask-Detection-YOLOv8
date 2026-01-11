@@ -15,7 +15,7 @@ st.set_page_config(
 )
 
 st.title("😷 Face Mask Detection (YOLOv8)")
-st.caption("Real-time mask detection with webcam, image, or video")
+st.caption("Real-time mask detection with image or video")
 
 # ===============================
 # LOAD MODEL
@@ -36,7 +36,7 @@ conf_thres = st.sidebar.slider(
     "Confidence Threshold",
     min_value=0.1,
     max_value=1.0,
-    value=0.4,
+    value=0.5,
     step=0.05
 )
 
@@ -48,33 +48,44 @@ selected_classes = st.sidebar.multiselect(
 
 show_fps = st.sidebar.checkbox("Show FPS", True)
 save_video = st.sidebar.checkbox("Save Output Video", False)
+skip_frames = st.sidebar.slider("Process Every N Frames", 1, 5, 2)
+inference_size = st.sidebar.selectbox("Inference Size", [320, 416, 640], index=1)
 
 os.makedirs("output", exist_ok=True)
 
 # ===============================
 # HELPER FUNCTION
 # ===============================
-def process_frame(frame):
+def process_frame(frame, resize=True):
     start = time.time()
-
-    results = model(frame, conf=conf_thres)
+    
+    h, w = frame.shape[:2]
+    
+    if resize:
+        frame_resized = cv2.resize(frame, (inference_size, inference_size))
+    else:
+        frame_resized = frame
+    
+    results = model(frame_resized, conf=conf_thres, verbose=False)
     boxes = results[0].boxes
 
     if boxes is not None:
         for box in boxes:
             cls_id = int(box.cls[0])
             label = class_names[cls_id]
-
             if label not in selected_classes:
-                box.conf[0] = 0  # hide
+                box.conf[0] = 0
 
     annotated = results[0].plot()
+    
+    if resize:
+        annotated = cv2.resize(annotated, (w, h))
 
     fps = 1 / (time.time() - start)
     if show_fps:
         cv2.putText(
             annotated,
-            f"FPS: {fps:.2f}",
+            f"FPS: {fps:.1f}",
             (20, 40),
             cv2.FONT_HERSHEY_SIMPLEX,
             1,
@@ -92,13 +103,13 @@ IS_CLOUD = os.environ.get("STREAMLIT_SERVER_RUNNING") == "true"
 
 if IS_CLOUD:
     st.info("ℹ️ Webcam tidak tersedia di Streamlit Cloud. Gunakan Image atau Video.")
-
-source = st.selectbox(
-    "Select Input Source",
-    ["Webcam", "Image", "Video"]
-)
+    source = st.selectbox("Select Input Source", ["Image", "Video"])
+else:
+    source = st.selectbox("Select Input Source", ["Webcam", "Image", "Video"])
 
 frame_placeholder = st.empty()
+progress_bar = st.empty()
+status_text = st.empty()
 
 # ===============================
 # WEBCAM MODE
@@ -125,13 +136,13 @@ if source == "Webcam":
                 break
 
             frame = cv2.flip(frame, 1)
-            frame = process_frame(frame)
+            frame = process_frame(frame, resize=True)
 
             if writer:
                 writer.write(frame)
 
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame_placeholder.image(frame_rgb, channels="RGB")
+            frame_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
 
         cap.release()
         if writer:
@@ -151,10 +162,14 @@ elif source == "Image":
             )
         )
 
-        result_img = process_frame(image)
+        with status_text.container():
+            st.info("🔄 Processing image...")
+
+        result_img = process_frame(image, resize=True)
         result_img = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
 
         st.image(result_img, caption="Detection Result", use_column_width=True)
+        st.success("✅ Done!")
 
 # ===============================
 # VIDEO MODE
@@ -168,33 +183,68 @@ else:
             f.write(video_file.read())
 
         cap = cv2.VideoCapture(temp_path)
+        
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        width = int(cap.get(3))
+        height = int(cap.get(4))
+        
+        with status_text.container():
+            st.info(f"📹 Video: {total_frames} frames @ {fps}fps | Processing every {skip_frames} frame(s)")
+        
         writer = None
-
         if save_video:
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             writer = cv2.VideoWriter(
                 "output/video_output.mp4",
                 fourcc,
-                int(cap.get(cv2.CAP_PROP_FPS)),
-                (int(cap.get(3)), int(cap.get(4)))
+                fps,
+                (width, height)
             )
 
+        frame_count = 0
+        processed_count = 0
+        
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
 
-            frame = process_frame(frame)
+            if frame_count % skip_frames != 0:
+                if writer:
+                    writer.write(frame)
+                frame_count += 1
+                continue
+
+            frame = process_frame(frame, resize=True)
+            processed_count += 1
 
             if writer:
                 writer.write(frame)
 
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame_placeholder.image(frame_rgb, channels="RGB")
+            frame_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
+            
+            progress = frame_count / total_frames
+            progress_bar.progress(min(progress, 1.0))
+            
+            frame_count += 1
 
         cap.release()
         if writer:
             writer.release()
 
-        st.success("✅ Video processing completed")
-
+        progress_bar.progress(1.0)
+        st.success(f"✅ Video processing completed! ({processed_count} frames processed)")
+        
+        if save_video and os.path.exists("output/video_output.mp4"):
+            with open("output/video_output.mp4", "rb") as f:
+                st.download_button(
+                    "⬇️ Download Output Video",
+                    f.read(),
+                    "video_output.mp4",
+                    "video/mp4"
+                )
+        
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
