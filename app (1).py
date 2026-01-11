@@ -44,7 +44,7 @@ conf_thres = st.sidebar.slider(
     "Confidence Threshold",
     min_value=0.1,
     max_value=1.0,
-    value=0.3,  # TURUNKAN dari 0.4 ke 0.3
+    value=0.3,
     step=0.05
 )
 
@@ -113,9 +113,10 @@ def process_frame(frame, resize=True):
     # Add FPS counter
     fps = 1 / (time.time() - start)
     if show_fps:
+        num_detections = len(boxes) if boxes is not None else 0
         cv2.putText(
             annotated,
-            f"FPS: {fps:.1f} | Detections: {len(boxes) if boxes is not None else 0}",
+            f"FPS: {fps:.1f} | Detections: {num_detections}",
             (20, 40),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.8,
@@ -123,7 +124,7 @@ def process_frame(frame, resize=True):
             2
         )
 
-    return annotated
+    return annotated, results
 
 
 # ===============================
@@ -155,7 +156,7 @@ if source == "Image":
         with status_text.container():
             st.info("🔄 Processing image...")
 
-        result_img = process_frame(image, resize=False)
+        result_img, _ = process_frame(image, resize=False)
         result_img = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
 
         st.image(result_img, caption="Detection Result", use_column_width=True)
@@ -199,7 +200,7 @@ else:
 
         frame_count = 0
         processed_count = 0
-        detection_count = 0
+        total_detections = 0
         
         while cap.isOpened():
             ret, frame = cap.read()
@@ -213,20 +214,19 @@ else:
                 frame_count += 1
                 continue
 
-            # Process frame
-            frame = process_frame(frame, resize=True)
+            # Process frame ONLY ONCE
+            frame_processed, results = process_frame(frame, resize=True)
             processed_count += 1
             
-            # Count detections
-            results = model(frame, conf=conf_thres, verbose=False)
+            # Count detections dari hasil inference
             if results[0].boxes is not None:
-                detection_count += len(results[0].boxes)
+                total_detections += len(results[0].boxes)
 
             if writer:
-                writer.write(frame)
+                writer.write(frame_processed)
 
             # Display frame
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame_rgb = cv2.cvtColor(frame_processed, cv2.COLOR_BGR2RGB)
             frame_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
             
             # Update progress bar
@@ -240,7 +240,7 @@ else:
             writer.release()
 
         progress_bar.progress(1.0)
-        st.success(f"✅ Done! ({processed_count} frames processed | {detection_count} detections)")
+        st.success(f"✅ Done! ({processed_count} frames processed | {total_detections} total detections)")
         
         # Download button
         if save_video and os.path.exists("output/video_output.mp4"):
