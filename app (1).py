@@ -5,77 +5,64 @@ import os
 import numpy as np
 from ultralytics import YOLO
 from pathlib import Path
+import shutil
 
 # ===============================
 # STREAMLIT CONFIG
 # ===============================
 st.set_page_config(
-    page_title="Face Mask Detection YOLOv8",
+    page_title="Face Mask Detection & Trainer YOLOv8",
     layout="wide"
 )
 
-st.title("😷 Face Mask Detection (YOLOv8)")
-st.caption("Real-time mask detection with image or video")
+st.title("😷 Face Mask Detection & Training (YOLOv8)")
+st.caption("Deteksi masker real-time atau latih ulang model dengan dataset baru")
 
 # ===============================
 # LOAD MODEL
 # ===============================
 @st.cache_resource
-def load_model():
+def load_model(model_path="best.pt"):
     try:
-        return YOLO("best.pt")
+        return YOLO(model_path)
     except Exception as e:
         st.error(f"❌ Model load error: {str(e)}")
-        st.info("💡 Make sure best.pt exists in root folder")
         return None
 
 model = load_model()
-if model is None:
-    st.stop()
-
-class_names = model.names
 
 # ===============================
 # SIDEBAR SETTINGS
 # ===============================
 st.sidebar.header("⚙️ Settings")
 
-conf_thres = st.sidebar.slider(
-    "Confidence Threshold",
-    min_value=0.1,
-    max_value=1.0,
-    value=0.3,
-    step=0.05
-)
+# Menu Navigasi Utama
+mode = st.sidebar.selectbox("Pilih Mode", ["Inference (Deteksi)", "Training (Latih Model)"])
 
-iou_thres = st.sidebar.slider(
-    "IOU Threshold",
-    min_value=0.1,
-    max_value=1.0,
-    value=0.45,
-    step=0.05
-)
-
-selected_classes = st.sidebar.multiselect(
-    "Filter Class",
-    options=list(class_names.values()),
-    default=list(class_names.values())
-)
-
-show_fps = st.sidebar.checkbox("Show FPS", True)
-save_video = st.sidebar.checkbox("Save Output Video", False)
-skip_frames = st.sidebar.slider("Process Every N Frames", 1, 5, 1)
-inference_size = st.sidebar.selectbox("Inference Size", [320, 416, 640], index=2)
+if mode == "Inference (Deteksi)":
+    conf_thres = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, 0.3, 0.05)
+    iou_thres = st.sidebar.slider("IOU Threshold", 0.1, 1.0, 0.45, 0.05)
+    
+    if model:
+        class_names = model.names
+        selected_classes = st.sidebar.multiselect(
+            "Filter Class",
+            options=list(class_names.values()),
+            default=list(class_names.values())
+        )
+    
+    show_fps = st.sidebar.checkbox("Show FPS", True)
+    save_video = st.sidebar.checkbox("Save Output Video", False)
+    skip_frames = st.sidebar.slider("Process Every N Frames", 1, 5, 1)
+    inference_size = st.sidebar.selectbox("Inference Size", [320, 416, 640], index=2)
 
 os.makedirs("output", exist_ok=True)
 
 # ===============================
-# HELPER FUNCTION
+# HELPER FUNCTION (PROSES FRAME)
 # ===============================
 def process_frame(frame, resize=True):
-    """Process frame dengan YOLO inference"""
     start = time.time()
-    
     h, w = frame.shape[:2]
     
     if resize and inference_size < 640:
@@ -83,22 +70,15 @@ def process_frame(frame, resize=True):
     else:
         frame_resized = frame
     
-    results = model(
-        frame_resized, 
-        conf=conf_thres,
-        iou=iou_thres,
-        verbose=False
-    )
-    
+    results = model(frame_resized, conf=conf_thres, iou=iou_thres, verbose=False)
     boxes = results[0].boxes
 
+    # Filter class
     if boxes is not None:
         for box in boxes:
             cls_id = int(box.cls[0])
-            label = class_names[cls_id]
-
-            if label not in selected_classes:
-                box.conf[0] = 0
+            if model.names[cls_id] not in selected_classes:
+                box.conf[0] = 0 
 
     annotated = results[0].plot()
     
@@ -107,137 +87,104 @@ def process_frame(frame, resize=True):
 
     fps = 1 / (time.time() - start)
     if show_fps:
-        num_detections = len(boxes) if boxes is not None else 0
-        cv2.putText(
-            annotated,
-            f"FPS: {fps:.1f} | Detections: {num_detections}",
-            (20, 40),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (0, 255, 0),
-            2
-        )
-
-    return annotated, results
+        cv2.putText(annotated, f"FPS: {fps:.1f}", (20, 40), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+    return annotated
 
 # ===============================
-# INPUT SOURCE
+# LOGIC: INFERENCE MODE
 # ===============================
-source = st.selectbox(
-    "Select Input Source",
-    ["Image", "Video"]
-)
+if mode == "Inference (Deteksi)":
+    if model is None:
+        st.warning("Silakan pastikan file 'best.pt' ada atau latih model terlebih dahulu.")
+        st.stop()
 
-frame_placeholder = st.empty()
-progress_bar = st.empty()
-status_text = st.empty()
+    source = st.selectbox("Select Input Source", ["Image", "Video"])
+    
+    if source == "Image":
+        image_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
+        if image_file:
+            img = cv2.imdecode(np.frombuffer(image_file.read(), np.uint8), 1)
+            result_img = process_frame(img, resize=False)
+            st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), use_column_width=True)
+
+    else: # Video Mode
+        video_file = st.file_uploader("Upload Video", type=["mp4", "avi", "mov"])
+        if video_file:
+            temp_path = "temp_video.mp4"
+            with open(temp_path, "wb") as f:
+                f.write(video_file.read())
+            
+            cap = cv2.VideoCapture(temp_path)
+            frame_placeholder = st.empty()
+            
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret: break
+                
+                processed_frame = process_frame(frame)
+                frame_placeholder.image(cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB), channels="RGB")
+            
+            cap.release()
+            os.remove(temp_path)
 
 # ===============================
-# IMAGE MODE
-# ===============================
-if source == "Image":
-    image_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
-
-    if image_file:
-        image = np.array(
-            cv2.imdecode(
-                np.frombuffer(image_file.read(), np.uint8),
-                cv2.IMREAD_COLOR
-            )
-        )
-
-        with status_text.container():
-            st.info("🔄 Processing image...")
-
-        result_img, _ = process_frame(image, resize=False)
-        result_img = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
-
-        st.image(result_img, caption="Detection Result", use_column_width=True)
-        st.success("✅ Done!")
-
-# ===============================
-# VIDEO MODE
+# LOGIC: TRAINING MODE
 # ===============================
 else:
-    video_file = st.file_uploader("Upload Video", type=["mp4", "avi", "mov"])
+    st.header("🏋️ Train New Model")
+    st.info("Pastikan Anda memiliki dataset dalam format YOLO (folder images & labels) dan file data.yaml.")
 
-    if video_file:
-        temp_path = "temp_video.mp4"
-        with open(temp_path, "wb") as f:
-            f.write(video_file.read())
+    col1, col2 = st.columns(2)
+    with col1:
+        yaml_path = st.text_input("Path ke file data.yaml", value="dataset/data.yaml")
+        epochs = st.number_input("Jumlah Epochs", min_value=1, value=10)
+        imgsz = st.selectbox("Image Size Training", [320, 416, 640], index=2)
+    
+    with col2:
+        batch_size = st.number_input("Batch Size", min_value=-1, value=16, help="-1 untuk Auto-batch")
+        model_variant = st.selectbox("Base Model", ["yolov8n.pt", "yolov8s.pt", "best.pt"])
 
-        cap = cv2.VideoCapture(temp_path)
-        
-        if not cap.isOpened():
-            st.error("❌ Cannot open video file")
-            st.stop()
-        
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        fps = int(cap.get(cv2.CAP_PROP_FPS))
-        width = int(cap.get(3))
-        height = int(cap.get(4))
-        
-        with status_text.container():
-            st.info(f"📹 Video: {total_frames} frames @ {fps}fps | Processing every {skip_frames} frame(s)")
-        
-        writer = None
-        if save_video:
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            writer = cv2.VideoWriter(
-                "output/video_output.mp4",
-                fourcc,
-                fps,
-                (width, height)
-            )
-
-        frame_count = 0
-        processed_count = 0
-        total_detections = 0
-        
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            if frame_count % skip_frames != 0:
-                if writer:
-                    writer.write(frame)
-                frame_count += 1
-                continue
-
-            # Process frame HANYA SEKALI
-            frame_processed, results = process_frame(frame, resize=True)
-            processed_count += 1
-            
-            if results[0].boxes is not None:
-                total_detections += len(results[0].boxes)
-
-            if writer:
-                writer.write(frame_processed)
-
-            frame_rgb = cv2.cvtColor(frame_processed, cv2.COLOR_BGR2RGB)
-            frame_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
-            
-            progress = frame_count / total_frames
-            progress_bar.progress(min(progress, 1.0))
-            
-            frame_count += 1
-
-        cap.release()
-        if writer:
-            writer.release()
-
-        progress_bar.progress(1.0)
-        st.success(f"✅ Done! ({processed_count} frames processed | {total_detections} total detections)")
-        
-        if save_video and os.path.exists("output/video_output.mp4"):
-            with open("output/video_output.mp4", "rb") as f:
-                st.download_button(
-                    "⬇️ Download Output Video",
-                    f.read(),
-                    "video_output.mp4",
-                    "video/mp4"
-                )
-        
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+    if st.button("🚀 Start Training"):
+        if not os.path.exists(yaml_path):
+            st.error(f"File {yaml_path} tidak ditemukan!")
+        else:
+            try:
+                # Load base model untuk training
+                train_model = YOLO(model_variant)
+                
+                st.write("---")
+                with st.status("🏗️ Training sedang berjalan...", expanded=True) as status:
+                    st.write("Inisialisasi dataset...")
+                    # Menjalankan training
+                    results = train_model.train(
+                        data=yaml_path,
+                        epochs=epochs,
+                        imgsz=imgsz,
+                        batch=batch_size,
+                        project="runs/detect",
+                        name="mask_train",
+                        exist_ok=True
+                    )
+                    status.update(label="✅ Training Selesai!", state="complete", expanded=False)
+                
+                st.success("Model berhasil dilatih!")
+                
+                # Path ke model terbaik hasil training
+                best_model_path = "runs/detect/mask_train/weights/best.pt"
+                
+                if os.path.exists(best_model_path):
+                    with open(best_model_path, "rb") as f:
+                        st.download_button(
+                            label="⬇️ Download Trained Model (best.pt)",
+                            data=f,
+                            file_name="trained_best.pt",
+                            mime="application/octet-stream"
+                        )
+                    
+                    if st.button("🔄 Gunakan Model Baru"):
+                        shutil.copy(best_model_path, "best.pt")
+                        st.rerun()
+                
+            except Exception as e:
+                st.error(f"Terjadi kesalahan saat training: {e}")
