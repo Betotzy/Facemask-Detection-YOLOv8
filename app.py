@@ -88,6 +88,11 @@ def process_frame(frame):
 # ===============================
 # INPUT SOURCE
 # ===============================
+IS_CLOUD = os.environ.get("STREAMLIT_SERVER_RUNNING") == "true"
+
+if IS_CLOUD:
+    st.info("ℹ️ Webcam tidak tersedia di Streamlit Cloud. Gunakan Image atau Video.")
+
 source = st.selectbox(
     "Select Input Source",
     ["Webcam", "Image", "Video"]
@@ -192,3 +197,4 @@ else:
             writer.release()
 
         st.success("✅ Video processing completed")
+
